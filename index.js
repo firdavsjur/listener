@@ -3,14 +3,49 @@ import { StringSession } from "telegram/sessions/index.js";
 import { NewMessage } from "telegram/events/index.js";
 import input from "input";
 import dotenv from "dotenv";
+import fs from "fs";
+import Bottleneck from "bottleneck";
 dotenv.config();
 
 const apiId = parseInt(process.env.API_ID);
 const apiHash = process.env.API_HASH;
 const stringSession = new StringSession(process.env.STRING_SESSION);
-const keywords = process.env.KEYWORDS.split(",");
 const targetUserId = process.env.TARGET_USER_ID;
 const targetUserCloneId = process.env.TARGET_USER_CLONE_ID;
+
+const keywordsFile = "keywords.json";
+
+function loadKeywords() {
+  if (!fs.existsSync(keywordsFile)) {
+    fs.writeFileSync(keywordsFile, JSON.stringify(["bonus"], null, 2));
+  }
+  return JSON.parse(fs.readFileSync(keywordsFile));
+}
+
+function saveKeywords(list) {
+  fs.writeFileSync(keywordsFile, JSON.stringify(list, null, 2));
+}
+
+let keywords = loadKeywords().map((k) => k.toLowerCase());
+
+const limiter = new Bottleneck({
+  minTime: 5000,
+  maxConcurrent: 1
+});
+
+async function forwardMessageQueue(client, chatId, messageId) {
+  await limiter.schedule(async () => {
+    await client.forwardMessages(targetUserCloneId, {
+      messages: [messageId],
+      fromPeer: chatId,
+    });
+    await client.forwardMessages(targetUserId, {
+      messages: [messageId],
+      fromPeer: chatId,
+    });
+    console.log(`📤 Forwarded post from chat ${chatId}`);
+  });
+}
 
 const client = new TelegramClient(stringSession, apiId, apiHash, { connectionRetries: 5 });
 
@@ -30,24 +65,46 @@ const client = new TelegramClient(stringSession, apiId, apiHash, { connectionRet
     try {
       const message = event.message;
       if (!message || !message.message) return;
-
       const text = message.message.toLowerCase();
 
-      if (keywords.some((k) => text.includes(k.toLowerCase()))) {
-        console.log(`🔍 Keyword found in: ${message.chat?.title || "Unknown Channel"}`);
-        await client.forwardMessages(targetUserCloneId, {
-            messages: [message.id],
-            fromPeer: message.chatId,
-        });
-        await client.forwardMessages(targetUserId, {
-            messages: [message.id],
-            fromPeer: message.chatId,
-        });
+      if (message.senderId?.toString() === targetUserId) {
+        if (text.startsWith("/add keyword ")) {
+          const newKey = text.replace("/add keyword ", "").trim();
+          if (!keywords.includes(newKey)) {
+            keywords.push(newKey);
+            saveKeywords(keywords);
+            await client.sendMessage(targetUserId, { message: `✅ Keyword added: ${newKey}` });
+          } else {
+            await client.sendMessage(targetUserId, { message: `⚠️ '${newKey}' already exists.` });
+          }
+          return;
+        }
+
+        if (text.startsWith("/remove keyword ")) {
+          const delKey = text.replace("/remove keyword ", "").trim();
+          keywords = keywords.filter((k) => k !== delKey);
+          saveKeywords(keywords);
+          await client.sendMessage(targetUserId, { message: `🗑️ Removed keyword: ${delKey}` });
+          return;
+        }
+
+        if (text === "/list keywords") {
+          await client.sendMessage(targetUserId, {
+            message: `📋 Current keywords:\n${keywords.join(", ")}`,
+          });
+          return;
+        }
+      }
+
+      if (keywords.some((k) => text.includes(k))) {
+        const channelName = message.chat?.title || "Unknown Channel";
+        console.log(`🔍 Keyword found in "${channelName}"`);
+        await forwardMessageQueue(client, message.chatId, message.id);
       }
     } catch (err) {
-      console.error("Error processing update:", err);
+      console.error("❌ Error:", err);
     }
-  }, new NewMessage({})); 
+  }, new NewMessage({}));
 
   process.stdin.resume();
 })();
