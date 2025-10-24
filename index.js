@@ -12,6 +12,7 @@ const apiHash = process.env.API_HASH;
 const stringSession = new StringSession(process.env.STRING_SESSION);
 const targetUserId = process.env.TARGET_USER_ID;
 const targetUserCloneId = process.env.TARGET_USER_CLONE_ID;
+const commanderId = process.env.COMMANDER_ID;
 
 const keywordsFile = "keywords.json";
 
@@ -67,15 +68,15 @@ const client = new TelegramClient(stringSession, apiId, apiHash, { connectionRet
       if (!message || !message.message) return;
       const text = message.message.toLowerCase();
 
-      if (message.senderId?.toString() === targetUserId) {
+      if (message.senderId?.toString() === commanderId) {
         if (text.startsWith("/add keyword ")) {
           const newKey = text.replace("/add keyword ", "").trim();
           if (!keywords.includes(newKey)) {
             keywords.push(newKey);
             saveKeywords(keywords);
-            await client.sendMessage(targetUserId, { message: `✅ Keyword added: ${newKey}` });
+            await client.sendMessage(commanderId, { message: `✅ Keyword added: ${newKey}` });
           } else {
-            await client.sendMessage(targetUserId, { message: `⚠️ '${newKey}' already exists.` });
+            await client.sendMessage(commanderId, { message: `⚠️ '${newKey}' already exists.` });
           }
           return;
         }
@@ -84,12 +85,12 @@ const client = new TelegramClient(stringSession, apiId, apiHash, { connectionRet
           const delKey = text.replace("/remove keyword ", "").trim();
           keywords = keywords.filter((k) => k !== delKey);
           saveKeywords(keywords);
-          await client.sendMessage(targetUserId, { message: `🗑️ Removed keyword: ${delKey}` });
+          await client.sendMessage(commanderId, { message: `🗑️ Removed keyword: ${delKey}` });
           return;
         }
 
         if (text === "/list keywords") {
-          await client.sendMessage(targetUserId, {
+          await client.sendMessage(commanderId, {
             message: `📋 Current keywords:\n${keywords.join(", ")}`,
           });
           return;
